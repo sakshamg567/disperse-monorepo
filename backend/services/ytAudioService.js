@@ -16,12 +16,16 @@ const extractAudio = (videoURL) => {
 
       const command = `yt-dlp -f bestaudio --extract-audio --audio-format mp3 -o "${outputPath}" "${videoURL}"`;
 
+      console.log("Running command:", command); // Debugging info
+
       exec(command, (error, stdout, stderr) => {
          if (error) {
+            console.error("YT-DLP Error:", stderr); // Log full error details
             require("../utils/fileUtils").cleanup(tempDir);
-            return reject(`Error: ${error.message}`);
+            return reject(`Error: ${stderr}`);
          }
 
+         console.log("YT-DLP Output:", stdout); // Log yt-dlp output
          resolve({ filePath: outputPath, tempDir });
       });
    });
