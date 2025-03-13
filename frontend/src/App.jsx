@@ -25,7 +25,7 @@ function App() {
       
       try {
         // Updated endpoint and response handling
-        const BACKEND_URL = "https://disperse-backend-ib2r.onrender.com";
+        const BACKEND_URL = "https://disperse-monorepo-production.up.railway.app";
         const response = await axios.post(`${BACKEND_URL}/api/analysis/process`, {
           videoURL: url
         });
