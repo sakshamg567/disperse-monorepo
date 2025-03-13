@@ -13,22 +13,23 @@ const extractAudio = (videoURL) => {
       }
 
       const outputPath = path.join(tempDir, "audio.mp3");
+      const cookiesPath = path.join(__dirname, "cookies.txt");  // Use manually uploaded cookies
 
-      const command = `yt-dlp -f bestaudio --extract-audio --audio-format mp3 -o "${outputPath}" "${videoURL}"`;
+      const command = `yt-dlp --cookies "${cookiesPath}" -f bestaudio --extract-audio --audio-format mp3 -o "${outputPath}" "${videoURL}"`;
 
-      console.log("Running command:", command); // Debugging info
+      console.log("Running yt-dlp command:", command);
 
       exec(command, (error, stdout, stderr) => {
          if (error) {
-            console.error("YT-DLP Error:", stderr); // Log full error details
-            require("../utils/fileUtils").cleanup(tempDir);
+            console.error("YT-DLP Error:", stderr);
             return reject(`Error: ${stderr}`);
          }
 
-         console.log("YT-DLP Output:", stdout); // Log yt-dlp output
+         console.log("YT-DLP Output:", stdout);
          resolve({ filePath: outputPath, tempDir });
       });
    });
 };
+
 
 module.exports = { extractAudio };
