@@ -1,0 +1,399 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+================================================================
+File Summary
+================================================================
+
+Purpose:
+--------
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+
+File Format:
+------------
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Multiple file entries, each consisting of:
+  a. A separator line (================)
+  b. The file path (File: path/to/file)
+  c. Another separator line
+  d. The full contents of the file
+  e. A blank line
+
+Usage Guidelines:
+-----------------
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+
+Notes:
+------
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+
+Additional Info:
+----------------
+
+================================================================
+Directory Structure
+================================================================
+config/
+  prompt.json
+controllers/
+  analysisController.js
+routes/
+  Analysis.router.js
+services/
+  deepgramService.js
+  geminiBreakdown.js
+  ytAudioService.js
+utils/
+  fileUtils.js
+  formatTranscript.js
+.gitignore
+index.js
+package.json
+
+================================================================
+Files
+================================================================
+
+================
+File: config/prompt.json
+================
+{
+   "index_prompt": "Analyze the given Youtube video trancript breakdown and provide a json for index for this yt video,you need to output a json having a topic, subtopics(optional), start time for each for the subtopic . remove filler content, sponsors, keep breakdown not fine ingrained specified otherwise. The response **must always** be a JSON object with these **exact keys**: [{'topic1': 'string (topic name)','subtopics': Array (array of subtopics with key name(name of topic), start(starting time of subtopic in seconds)) Do NOT return extra text, just a valid JSON response.",
+   
+   "summary_prompt": "Given a raw YouTube video transcript, generate a well-organized summary that fully captures the essence of the video, providing an overview detailed enough for quick skimming while ensuring no key points are lost. Maintain coherence, remove redundant phrases, and present information clearly. Break down the content into logical sections with proper headings, bullet points, or numbered lists where necessary. Preserve all valuable insights, main arguments, and takeaways while keeping it concise. If the transcript contains storytelling, convert it into a structured narrative without unnecessary fluff. Do NOT just shorten sentences—truly distill the content into its most valuable form. The goal is to give someone the complete knowledge of the video without needing to watch it. Format it cleanly and professionally."
+}
+
+================
+File: controllers/analysisController.js
+================
+const { extractAudio } = require("../services/ytAudioService");
+const { ExtractTimedTranscript, ExtractTranscriptParagraph, extractTranscription } = require("../services/deepgramService");
+const initializeGeminiService = require("../services/geminiBreakdown");
+const formatTranscript = require("../utils/formatTranscript");
+
+let geminiService = null;
+
+// Initialize the service when the server starts
+(async () => {
+   try {
+     geminiService = await initializeGeminiService();
+   } catch (error) {
+     console.error("Failed to initialize Gemini service:", error);
+     process.exit(1); // Exit if we can't initialize the service
+   }
+ })();
+ 
+
+const handleProcessVideo = async(req, res) => {
+   let filePath, tempDir, result;
+   try {
+      if(!geminiService){
+         return res.status(500).json({error: "geminiService initialization failed"})
+      }
+      const { videoURL } = req.body;
+      if (!videoURL) {
+         return res.status(400).json({ error: "Video URL is required" });
+      }
+      try {
+         const audiofile = await extractAudio(videoURL);
+         filePath = audiofile?.filePath;
+         tempDir = audiofile?.tempDir;
+      } catch(e){
+         console.error("error in audio extraction");
+         return res.status(500).json({error: e.message})
+      }
+      try {
+         result = await extractTranscription(filePath, tempDir);
+      } catch(e){
+         console.error("error in deepgramService");
+         return res.status(500).json({error: e.message})
+      }  
+      // console.log(result);
+      
+      const TimedTranscript = ExtractTimedTranscript(result);
+      const TranscriptParagraph = ExtractTranscriptParagraph(result);
+      
+      const formattedTranscript = formatTranscript(TimedTranscript);
+      // console.log(formattedTranscript);
+      
+
+      const [Index, Summary] = await Promise.all([
+         geminiService.TranscriptToIndex(formattedTranscript), 
+         geminiService.TranscriptToSummary(TranscriptParagraph)
+      ])
+
+      res.json({
+         status: "success",
+         data: {
+            index: Index,
+            summary: Summary
+         }
+      });
+   } catch(error) {
+      console.error("Error in video pipeline");
+      res.status(500).json({
+         status: "failed",
+         error: error.message
+      })
+   }
+}
+
+module.exports = {handleProcessVideo}
+
+================
+File: routes/Analysis.router.js
+================
+const express = require("express");
+const router = express.Router();
+const { handleProcessVideo } = require("../controllers/analysisController");
+
+router.post('/process', handleProcessVideo)
+
+module.exports = router;
+
+================
+File: services/deepgramService.js
+================
+const { createClient } = require("@deepgram/sdk");
+const fs = require("fs");
+const { cleanup } = require("../utils/fileUtils");
+const dotenv = require("dotenv");
+dotenv.config();
+const deepgram = createClient(process.env.DEEPGRAM_SECRET_KEY);
+
+const extractTranscription = async (filePath, tempDir) => {
+   try {
+      if (!fs.existsSync(filePath)) {
+         throw new Error(`File not found: ${filePath}`);
+      }
+
+      const { result, error } = await deepgram.listen.prerecorded.transcribeFile(
+         fs.readFileSync(filePath),
+         {
+            model: "nova-3",
+            smart_format: true,
+            paragraphs: true,
+         }
+      );
+
+      if (error) throw error;
+      return result;
+   } finally {
+      cleanup(tempDir);
+   }
+};
+
+const ExtractTranscriptParagraph = (result) => {
+   return result?.results?.channels[0]?.alternatives[0]?.transcript
+}
+
+const ExtractTimedTranscript = (result) => {
+   return result?.results?.channels[0]?.alternatives[0]?.paragraphs.paragraphs;
+}
+
+module.exports = { ExtractTimedTranscript, ExtractTranscriptParagraph, extractTranscription };
+
+================
+File: services/geminiBreakdown.js
+================
+const fs = require("fs");
+const path = require("path");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const promptPath = path.join(__dirname, "../config/prompt.json");
+
+// Initialize models and export functions
+const initializeGeminiService = async () => {
+   try {
+      const promptFile = await fs.promises.readFile(promptPath, "utf8");
+      const { index_prompt, summary_prompt } = JSON.parse(promptFile);
+
+      const IndexModel = genAI.getGenerativeModel(
+         {
+            model: "gemini-2.0-flash-lite",
+            systemInstruction: index_prompt
+         },
+         {
+            apiVersion: "v1beta"
+         }
+      );
+
+      const SummaryModel = genAI.getGenerativeModel(
+         {
+            model: "gemini-2.0-flash-lite",
+            systemInstruction: summary_prompt
+         },
+         {
+            apiVersion: "v1beta"
+         }
+      );
+
+      const TranscriptToIndex = async (transcript) => {
+         try {
+            const response = await IndexModel.generateContent(JSON.stringify(transcript));
+            let responseText = response.response?.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+            responseText = responseText.replace(/```json|```/g, "").trim();
+      
+            return JSON.parse(responseText);
+         } catch (error) {
+            console.error("Error in Index Generation:", error);
+            return { error: "Failed to generate index" };
+         }
+      };
+
+      const TranscriptToSummary = async (transcript) => {
+         try {
+            const response = await SummaryModel.generateContent(JSON.stringify(transcript));
+            let responseText = response.response?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+
+            // Summary might not be JSON, return as plain text
+            return responseText;
+         } catch (error) {
+            console.error("Error in Summary Generation:", error);
+            return { error: "Failed to generate summary" };
+         }
+      };
+
+      return { TranscriptToIndex, TranscriptToSummary };
+   } catch (error) {
+      console.error("Error initializing Gemini service:", error);
+      throw error;
+   }
+};
+
+// Export the initialization function
+module.exports = initializeGeminiService;
+
+================
+File: services/ytAudioService.js
+================
+const { exec } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+const os = require("os");
+const { v4: uuidv4 } = require("uuid");
+
+const extractAudio = (videoURL) => {
+   return new Promise((resolve, reject) => {
+      const tempDir = path.join(os.tmpdir(), `yt-extract-${uuidv4()}`);
+
+      if (!fs.existsSync(tempDir)) {
+         fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      const outputPath = path.join(tempDir, "audio.mp3");
+
+      const command = `yt-dlp -f bestaudio --extract-audio --audio-format mp3 -o "${outputPath}" "${videoURL}"`;
+
+      exec(command, (error, stdout, stderr) => {
+         if (error) {
+            require("../utils/fileUtils").cleanup(tempDir);
+            return reject(`Error: ${error.message}`);
+         }
+
+         resolve({ filePath: outputPath, tempDir });
+      });
+   });
+};
+
+module.exports = { extractAudio };
+
+================
+File: utils/fileUtils.js
+================
+const fs = require("fs");
+
+const cleanup = (tempDir) => {
+   if (tempDir && fs.existsSync(tempDir)) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+   }
+};
+
+module.exports = { cleanup };
+
+================
+File: utils/formatTranscript.js
+================
+const formatTranscript = (TimedTranscript) => {
+   const formattedTranscript = {
+      sentences: TimedTranscript.flatMap((section) =>
+         section.sentences.map((sentence) => ({
+            text: sentence.text,
+            start: sentence.start,
+            end: sentence.end,
+         }))
+      ),
+   };
+   return formattedTranscript
+}
+
+module.exports = formatTranscript
+
+================
+File: .gitignore
+================
+.env
+node_modules/
+
+================
+File: index.js
+================
+const express = require("express");
+const analysisRouter = require("./routes/Analysis.router")
+
+const app = express();
+app.use(express.json())
+app.use(express.urlencoded({extended: true}))
+app.get("/", (req, res) => {
+   res.send("HELLO");
+})
+app.use("/api/analysis", analysisRouter)
+app.listen(3000, () => console.log("Server is listening on port 3000"))
+
+================
+File: package.json
+================
+{
+  "name": "refract",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "nodemon index"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@deepgram/sdk": "^3.11.1",
+    "@google/generative-ai": "^0.24.0",
+    "axios": "^1.7.9",
+    "child_process": "^1.0.2",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "groq-sdk": "^0.16.0",
+    "mongoose": "^8.10.1",
+    "nodemon": "^3.1.9",
+    "uuid": "^11.1.0"
+  }
+}
+
+
+
+================================================================
+End of Codebase
+================================================================

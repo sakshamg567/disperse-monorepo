@@ -21,11 +21,18 @@ const extractTranscription = async (filePath, tempDir) => {
       );
 
       if (error) throw error;
-
-      return result?.results?.channels[0]?.alternatives[0]?.paragraphs.paragraphs;
+      return result;
    } finally {
       cleanup(tempDir);
    }
 };
 
-module.exports = { extractTranscription };
+const ExtractTranscriptParagraph = (result) => {
+   return result?.results?.channels[0]?.alternatives[0]?.transcript
+}
+
+const ExtractTimedTranscript = (result) => {
+   return result?.results?.channels[0]?.alternatives[0]?.paragraphs.paragraphs;
+}
+
+module.exports = { ExtractTimedTranscript, ExtractTranscriptParagraph, extractTranscription };

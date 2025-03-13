@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const { processTranscription } = require("../controllers/analysisController");
+const { handleProcessVideo } = require("../controllers/analysisController");
 
-router.post("/transcribe", processTranscription);
+router.post('/process', handleProcessVideo)
 
 module.exports = router;

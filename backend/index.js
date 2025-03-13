@@ -7,5 +7,5 @@ app.use(express.urlencoded({extended: true}))
 app.get("/", (req, res) => {
    res.send("HELLO");
 })
-app.use("/analysis", analysisRouter)
+app.use("/api/analysis", analysisRouter)
 app.listen(3000, () => console.log("Server is listening on port 3000"))

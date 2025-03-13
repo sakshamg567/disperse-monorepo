@@ -17,6 +17,7 @@
     "child_process": "^1.0.2",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "groq-sdk": "^0.16.0",
     "mongoose": "^8.10.1",
     "nodemon": "^3.1.9",
     "uuid": "^11.1.0"
